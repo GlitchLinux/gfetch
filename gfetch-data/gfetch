@@ -1,0 +1,169 @@
+#!/bin/bash
+# ╔══════════════════════════════════════════╗
+# ║  gfetch - Glitch System Fetch Utility    ║
+# ║  Combines ASCII art + system info        ║
+# ║  Part of Glitch GNU/Linux v2.0           ║
+# ╚══════════════════════════════════════════╝
+
+GFETCH_DIR="/usr/local/bin/gfetch-data"
+GFETCH_CONF="${GFETCH_DIR}/gfetch-settings.conf"
+LOLCAT="/usr/games/lolcat"
+
+# ── Load settings (defaults) ──
+ASCII_FILE="${GFETCH_DIR}/gfetch-ascii-art"
+ASCII_ROWS=17
+BORDERIZE_ENABLED=1
+BORDERIZE_BORDER_COLOR="000000"
+BORDERIZE_TEXT_COLOR=""
+ASCII_PAD_RIGHT=2
+
+# Override with user settings if config exists
+if [[ -f "$GFETCH_CONF" ]]; then
+    source "$GFETCH_CONF"
+fi
+
+# ── Strip ANSI escapes for width calculation ──
+strip_ansi() {
+    sed 's/\x1b\[[0-9;]*m//g; s/\x1b\[38;2;[0-9;]*m//g; s/\x1b\[0m//g'
+}
+
+# ── Visual width of a string (ignoring ANSI codes) ──
+visual_width() {
+    local stripped
+    stripped=$(printf '%s' "$1" | strip_ansi)
+    printf '%s' "$stripped" | wc -m
+}
+
+# ── Generate ASCII art with lolcat ──
+generate_ascii() {
+    if [[ -f "$ASCII_FILE" ]]; then
+        "$LOLCAT" -f "$ASCII_FILE" 2>/dev/null || cat "$ASCII_FILE"
+    else
+        echo "[!] ASCII art not found: $ASCII_FILE"
+    fi
+}
+
+# ── Generate sysinfo lines ──
+generate_sysinfo() {
+    local cfg="${GFETCH_DIR}/gfetch.cfg"
+    if [[ ! -f "$cfg" ]]; then
+        echo "[!] gfetch.cfg not found"
+        return
+    fi
+    cd "$GFETCH_DIR" || return
+    bash "$cfg" 2>/dev/null
+}
+
+# ── Find max visual width of ASCII lines ──
+max_visual_width() {
+    local max=0
+    while IFS= read -r line; do
+        local w
+        w=$(visual_width "$line")
+        (( w > max )) && max=$w
+    done
+    echo "$max"
+}
+
+# ── Pad a line with ANSI codes to a fixed visual width ──
+pad_line() {
+    local line="$1"
+    local target_width="$2"
+    local current_width
+    current_width=$(visual_width "$line")
+    local padding=$(( target_width - current_width ))
+    if (( padding > 0 )); then
+        printf '%s%*s' "$line" "$padding" ""
+    else
+        printf '%s' "$line"
+    fi
+}
+
+# ── MAIN ──
+main() {
+    # Generate both outputs into temp files
+    local tmp_ascii tmp_sysinfo tmp_sysinfo_raw
+    tmp_ascii=$(mktemp /tmp/gfetch-ascii.XXXXXX)
+    tmp_sysinfo_raw=$(mktemp /tmp/gfetch-sysinfo-raw.XXXXXX)
+    tmp_sysinfo=$(mktemp /tmp/gfetch-sysinfo.XXXXXX)
+
+    generate_ascii > "$tmp_ascii"
+    generate_sysinfo > "$tmp_sysinfo_raw"
+
+    # Apply borderize if enabled
+    if [[ "$BORDERIZE_ENABLED" -eq 1 ]]; then
+        local border_args="-${BORDERIZE_BORDER_COLOR}"
+        if [[ -n "$BORDERIZE_TEXT_COLOR" ]]; then
+            border_args="${border_args} -${BORDERIZE_TEXT_COLOR}"
+        fi
+        cat "$tmp_sysinfo_raw" | borderize $border_args > "$tmp_sysinfo"
+    else
+        cat "$tmp_sysinfo_raw" > "$tmp_sysinfo"
+    fi
+
+    # Count lines
+    local ascii_line_count sysinfo_line_count
+    ascii_line_count=$(wc -l < "$tmp_ascii")
+    sysinfo_line_count=$(wc -l < "$tmp_sysinfo")
+
+    # Use configured ASCII_ROWS if it's larger (for custom art with trailing whitespace)
+    if (( ASCII_ROWS > ascii_line_count )); then
+        ascii_line_count=$ASCII_ROWS
+    fi
+
+    # Calculate vertical centering offset
+    local offset=0
+    if (( ascii_line_count > sysinfo_line_count )); then
+        offset=$(( (ascii_line_count - sysinfo_line_count) / 2 ))
+    fi
+
+    # Find max visual width of ASCII art for padding
+    local ascii_max_width
+    ascii_max_width=$(cat "$tmp_ascii" | max_visual_width)
+    local pad_width=$(( ascii_max_width + ASCII_PAD_RIGHT ))
+
+    # Read ASCII and sysinfo into arrays
+    local -a ascii_lines=()
+    local -a sysinfo_lines=()
+
+    while IFS= read -r line; do
+        ascii_lines+=("$line")
+    done < "$tmp_ascii"
+
+    while IFS= read -r line; do
+        sysinfo_lines+=("$line")
+    done < "$tmp_sysinfo"
+
+    # Total output height = max of both
+    local total_lines=$ascii_line_count
+    if (( offset + sysinfo_line_count > total_lines )); then
+        total_lines=$(( offset + sysinfo_line_count ))
+    fi
+
+    # Print side-by-side
+    local sysinfo_idx=0
+    for (( i=0; i<total_lines; i++ )); do
+        # Get ASCII line (or empty if past end)
+        local a_line="${ascii_lines[$i]:-}"
+
+        # Pad ASCII line to fixed visual width
+        local padded
+        padded=$(pad_line "$a_line" "$pad_width")
+
+        # Reset colors after ASCII art line (stop lolcat bleed)
+        printf '%s\033[0m' "$padded"
+
+        # Print sysinfo line if we're in the centered range
+        if (( i >= offset && sysinfo_idx < sysinfo_line_count )); then
+            printf '%s' "${sysinfo_lines[$sysinfo_idx]}"
+            (( sysinfo_idx++ ))
+        fi
+
+        printf '\n'
+    done
+
+    # Cleanup
+    rm -f "$tmp_ascii" "$tmp_sysinfo" "$tmp_sysinfo_raw"
+}
+
+main

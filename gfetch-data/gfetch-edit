@@ -1,0 +1,101 @@
+#!/bin/bash
+# ╔══════════════════════════════════════════╗
+# ║  gfetch-edit - Configuration Editor      ║
+# ║  Edit gfetch appearance & sysinfo        ║
+# ╚══════════════════════════════════════════╝
+
+GFETCH_DIR="/usr/local/bin/gfetch-data"
+GFETCH_CONF="${GFETCH_DIR}/gfetch-settings.conf"
+GFETCH_CFG="${GFETCH_DIR}/gfetch.cfg"
+
+show_menu() {
+    clear
+    echo ""
+    echo "  ╭───────────────────────────────────╮"
+    echo "  │       gfetch-edit                  │"
+    echo "  ╰───────────────────────────────────╯"
+    echo ""
+    echo "  1) Edit sysinfo modules   (gfetch.cfg)"
+    echo "  2) Edit display settings  (gfetch-settings.conf)"
+    echo "  3) Toggle borderize       (on/off)"
+    echo "  4) Set borderize color    (hex)"
+    echo "  5) Set custom ASCII art   (path + rows)"
+    echo "  6) Reset ASCII to default"
+    echo "  7) Preview gfetch"
+    echo "  8) Exit"
+    echo ""
+}
+
+toggle_borderize() {
+    source "$GFETCH_CONF" 2>/dev/null
+    if [[ "$BORDERIZE_ENABLED" -eq 1 ]]; then
+        sed -i 's/^BORDERIZE_ENABLED=1/BORDERIZE_ENABLED=0/' "$GFETCH_CONF"
+        echo "  → Borderize: OFF"
+    else
+        sed -i 's/^BORDERIZE_ENABLED=0/BORDERIZE_ENABLED=1/' "$GFETCH_CONF"
+        echo "  → Borderize: ON"
+    fi
+    sleep 1
+}
+
+set_border_color() {
+    echo -n "  Enter hex color (e.g. FF0000): "
+    read -r color
+    color="${color//#/}"
+    if [[ "$color" =~ ^[0-9a-fA-F]{6}$ ]]; then
+        sed -i "s/^BORDERIZE_BORDER_COLOR=.*/BORDERIZE_BORDER_COLOR=\"${color}\"/" "$GFETCH_CONF"
+        echo "  → Border color set to: #${color}"
+    else
+        echo "  [!] Invalid hex color. Use 6 hex chars (e.g. FF0000)"
+    fi
+    sleep 1
+}
+
+set_custom_ascii() {
+    echo -n "  Enter path to ASCII art file: "
+    read -r art_path
+    if [[ ! -f "$art_path" ]]; then
+        echo "  [!] File not found: $art_path"
+        sleep 1
+        return
+    fi
+
+    # Auto-count rows
+    local row_count
+    row_count=$(wc -l < "$art_path")
+    echo "  Detected ${row_count} rows in file."
+    echo -n "  Override row count? (Enter to keep ${row_count}): "
+    read -r custom_rows
+    if [[ -n "$custom_rows" && "$custom_rows" =~ ^[0-9]+$ ]]; then
+        row_count=$custom_rows
+    fi
+
+    sed -i "s|^ASCII_FILE=.*|ASCII_FILE=\"${art_path}\"|" "$GFETCH_CONF"
+    sed -i "s/^ASCII_ROWS=.*/ASCII_ROWS=${row_count}/" "$GFETCH_CONF"
+    echo "  → ASCII art: ${art_path} (${row_count} rows)"
+    sleep 1
+}
+
+reset_ascii() {
+    sed -i "s|^ASCII_FILE=.*|ASCII_FILE=\"${GFETCH_DIR}/gfetch-ascii-art\"|" "$GFETCH_CONF"
+    sed -i "s/^ASCII_ROWS=.*/ASCII_ROWS=17/" "$GFETCH_CONF"
+    echo "  → ASCII art reset to default"
+    sleep 1
+}
+
+while true; do
+    show_menu
+    echo -n "  Select [1-8]: "
+    read -r choice
+    case $choice in
+        1) sudo nano "$GFETCH_CFG" ;;
+        2) sudo nano "$GFETCH_CONF" ;;
+        3) toggle_borderize ;;
+        4) set_border_color ;;
+        5) set_custom_ascii ;;
+        6) reset_ascii ;;
+        7) clear; gfetch; echo ""; read -rp "  Press Enter to continue..." ;;
+        8) clear; break ;;
+        *) echo "  [!] Invalid choice"; sleep 0.5 ;;
+    esac
+done

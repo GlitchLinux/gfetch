@@ -1,0 +1,4 @@
+#!/bin/bash
+
+sudo /usr/local/bin/gfetch-data/gfetch-edit
+
