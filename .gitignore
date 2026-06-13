@@ -1,0 +1,10 @@
+# backups / saves
+*.bak
+*.bak.*
+*.save
+*.swp
+*~
+
+# install artifacts
+gfetch-data.bak.*
+install-test*.sh
